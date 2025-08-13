@@ -26,7 +26,12 @@ st.caption(
 with st.sidebar:
     st.header("⚙️ Settings")
 
-    with st.expander("Severity thresholds", expanded=True):
+    section = st.selectbox(
+        "Choose Configuration Section",
+        ["Severity thresholds", "Anomaly detection", "Alert routing"]
+    )
+
+    if section == "Severity thresholds":
         bounce_weight = st.slider("Bounce weight (points)", 10, 80, 50, 5)
         max_gap_points = st.slider("Max points for EMI gap %", 10, 60, 40, 5)
         delay_points_per_day = st.slider("Delay points/day (cap 30)", 1, 5, 2, 1)
@@ -34,10 +39,10 @@ with st.sidebar:
         severity_watch = st.slider("WATCH threshold (score ≥)", 10, 80, 30, 5)
         severity_action = st.slider("ACTION threshold (score ≥)", 20, 100, 60, 5)
 
-    with st.expander("Anomaly detection", expanded=False):
+    elif section == "Anomaly detection":
         contamination = st.slider("Anomaly rate (contamination)", 0.01, 0.30, 0.20, 0.01)
 
-    with st.expander("Alert routing", expanded=False):
+    elif section == "Alert routing":
         default_officer_email = st.text_input("Officer email (demo)", "credit.officer@example.com")
         teams_webhook_env = os.getenv("TEAMS_WEBHOOK_URL", "")
         teams_webhook = st.text_input("Teams Incoming Webhook URL", teams_webhook_env, type="password")
