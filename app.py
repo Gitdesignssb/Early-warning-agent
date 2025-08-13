@@ -1,4 +1,3 @@
-
 import os
 import streamlit as st
 import pandas as pd
@@ -6,11 +5,8 @@ import numpy as np
 from sklearn.ensemble import IsolationForest
 from datetime import datetime
 import plotly.express as px
-import plotly.graph_objects as go
 import requests
 from dotenv import load_dotenv
-from pathlib import Path
-import io
 
 # -------------------------------
 # App & Env
@@ -21,7 +17,7 @@ load_dotenv()
 st.title("💡 Early Warning Loan Default Agent")
 st.caption(
     "Upload CSV → auto‑map behind the scenes → detect partials/bounces/delays → anomaly detection → "
-    "risk score & severity tiers → rich portfolio views → customer drilldowns → simulate/send alerts."
+    "risk score & severity tiers → rich portfolio views → simulate/send alerts."
 )
 
 # -------------------------------
@@ -63,27 +59,8 @@ REQUIRED_LOGICAL_FIELDS = {
 REQUIRED_MIN = ["loan_id", "emi_due_date", "emi_amount", "amount_paid"]
 
 @st.cache_data(show_spinner=False)
-def load_csv_resilient(uploaded_file):
-    try:
-        if uploaded_file is not None:
-            return pd.read_csv(uploaded_file, sep=None, engine="python", encoding="utf-8-sig")
-        sample_path = Path(__file__).parent / "sample_data.csv"
-        if sample_path.exists():
-            return pd.read_csv(sample_path, sep=None, engine="python", encoding="utf-8-sig")
-    except Exception:
-        pass
-
-    demo_data = {
-        "loan_id": ["L001", "L002", "L003"],
-        "customer_name": ["Alice", "Bob", "Charlie"],
-        "loan_type": ["Home", "Auto", "Personal"],
-        "emi_due_date": pd.to_datetime(["2023-08-01", "2023-08-05", "2023-08-10"]),
-        "emi_amount": [1000, 1500, 1200],
-        "amount_paid": [1000, 1000, 0],
-        "payment_date": pd.to_datetime(["2023-08-01", "2023-08-07", None]),
-        "bounce_flag": [0, 1, 1]
-    }
-    return pd.DataFrame(demo_data)
+def load_csv(file_or_path):
+    return pd.read_csv(file_or_path, sep=None, engine="python", encoding="utf-8-sig")
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -135,8 +112,8 @@ def severity_from_score(score, watch, action):
 # -------------------------------
 # Tabs
 # -------------------------------
-tab_data, tab_portfolio, tab_risk, tab_customers, tab_alerts, tab_notify = st.tabs(
-    ["📁 Data", "📊 Portfolio", "🗺️ Risk Landscape", "🧑‍💼 Customers", "🚨 Alerts", "📣 Notify"]
+tab_data, tab_portfolio, tab_risk, tab_alerts, tab_notify = st.tabs(
+    ["📁 Data", "📊 Portfolio", "🗺️ Risk Landscape", "🚨 Alerts", "📣 Notify"]
 )
 
 # ============ DATA TAB ============
@@ -144,7 +121,11 @@ with tab_data:
     st.subheader("📄 Raw Data")
 
     uploaded = st.file_uploader("Upload Loan Repayment CSV", type=["csv"])
-    df_raw = load_csv_resilient(uploaded)
+    if uploaded is not None:
+        df_raw = load_csv(uploaded)
+    else:
+        st.info("No file uploaded. Please upload a CSV file.")
+        st.stop()
 
     st.dataframe(df_raw.head(50), use_container_width=True, height=220)
 
@@ -251,3 +232,143 @@ with tab_data:
     work["severity"] = work["risk_score"].apply(lambda s: severity_from_score(s, severity_watch, severity_action))
 
     st.success("Data ready ✅")
+
+# ============ PORTFOLIO TAB ============
+with tab_portfolio:
+    st.subheader("📊 Portfolio Overview")
+
+    total = len(work)
+    rules_high = int(work["rule_high"].sum())
+    anomalies = int((work["anomaly_flag"] == "Anomaly").sum())
+    actions = int((work["severity"] == "Action").sum())
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Loans", total)
+    m2.metric("High‑Risk (rules)", rules_high)
+    m3.metric("Anomalies", anomalies)
+    m4.metric("Action Severity", actions)
+
+    cA, cB = st.columns(2)
+    fig_sev = px.histogram(
+        work, x="severity", color="severity",
+        color_discrete_map={"Info":"#6c757d","Watch":"#f39c12","Action":"#e74c3c"},
+        category_orders={"severity":["Info","Watch","Action"]},
+        title="Severity Distribution"
+    )
+    cA.plotly_chart(fig_sev, use_container_width=True)
+
+    fig_stack = px.histogram(
+        work, x="loan_type", color="severity", barmode="group",
+        color_discrete_map={"Info":"#6c757d","Watch":"#f39c12","Action":"#e74c3c"},
+        title="Loan Types by Severity"
+    )
+    cB.plotly_chart(fig_stack, use_container_width=True)
+
+# ============ RISK LANDSCAPE TAB ============
+with tab_risk:
+    st.subheader("🗺️ Risk Landscape")
+
+    view = st.radio("Choose view", ["Quadrant (Gap% vs Days Delay)", "Density Heatmap", "Sunburst (Loan Type → Severity)"], horizontal=True)
+
+    if view == "Quadrant (Gap% vs Days Delay)":
+        fig = px.scatter(
+            work,
+            x="days_delay", y="emi_gap_pct",
+            color="severity",
+            color_discrete_map={"Info":"#6c757d","Watch":"#f39c12","Action":"#e74c3c"},
+            size="risk_score",
+            hover_data=["loan_id","customer_name","loan_type","reason_codes","risk_score"],
+            title="Quadrant: Days Delay vs EMI Gap % (bubble size = risk score)"
+        )
+        fig.update_yaxes(tickformat=".0%", title_text="EMI Gap (%)")
+        fig.update_xaxes(title_text="Days Delay")
+        st.plotly_chart(fig, use_container_width=True)
+
+    elif view == "Density Heatmap":
+        fig = px.density_heatmap(
+            work, x="days_delay", y="emi_gap_pct",
+            nbinsx=20, nbinsy=20,
+            color_continuous_scale="YlOrRd",
+            title="Density Heatmap: Portfolio Hotspots (Days Delay vs EMI Gap %)"
+        )
+        fig.update_yaxes(tickformat=".0%", title_text="EMI Gap (%)")
+        fig.update_xaxes(title_text="Days Delay")
+        st.plotly_chart(fig, use_container_width=True)
+
+    else:
+        sb_df = work.copy()
+        sb_df["count"] = 1
+        fig = px.sunburst(
+            sb_df, path=["loan_type", "severity"], values="count",
+            color="severity",
+            color_discrete_map={"Info":"#6c757d","Watch":"#f39c12","Action":"#e74c3c"},
+            title="Sunburst: Composition by Loan Type → Severity"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+# ============ ALERTS TAB ============
+with tab_alerts:
+    st.subheader("🚨 Alerts")
+
+    sev_filter = st.multiselect("Filter by severity", ["Action","Watch","Info"], default=["Action","Watch"])
+    alerts = work[work["severity"].isin(sev_filter)][
+        ["loan_id","customer_name","loan_type","severity","risk_score","reason_codes",
+         "emi_gap","emi_gap_pct","days_delay","bounce_flag"]
+    ].sort_values(["severity","risk_score"], ascending=[False,False])
+
+    if alerts.empty:
+        st.success("No alerts at the selected severity levels.")
+    else:
+        display = alerts.copy()
+        display["emi_gap_pct"] = display["emi_gap_pct"].map(lambda v: f"{v:.0%}")
+        st.dataframe(display, use_container_width=True, height=320)
+        st.download_button("⬇️ Download Risk Report (CSV)", alerts.to_csv(index=False), "risk_report.csv", "text/csv")
+
+# ============ NOTIFY TAB ============
+with tab_notify:
+    st.subheader("📣 Send Alerts")
+
+    base = work[work["severity"].isin(["Action","Watch"])]
+    def msg_df(df):
+        return df[["loan_id","customer_name","loan_type","severity","risk_score","reason_codes",
+                   "emi_gap","emi_gap_pct","days_delay","bounce_flag"]].copy()
+
+    scope = st.selectbox("Which alerts to send?", ["Action only", "Action + Watch", "All severities"])
+    if scope == "Action only":
+        to_send = msg_df(work[work["severity"] == "Action"])
+    elif scope == "Action + Watch":
+        to_send = msg_df(base)
+    else:
+        to_send = msg_df(work)
+
+    with st.expander("Preview first 5 messages", expanded=True):
+        for _, row in to_send.head(5).iterrows():
+            st.code(build_alert_message(row), language=None)
+
+    if st.button("Send / Simulate Alerts"):
+        if to_send.empty:
+            st.info("No alerts to send for current scope.")
+        else:
+            st.toast(f"Prepared {len(to_send)} alert(s).", icon="✅")
+            sent = 0
+            if not dry_run and teams_webhook:
+                for _, row in to_send.iterrows():
+                    ok = send_to_teams(teams_webhook, build_alert_message(row))
+                    if ok:
+                        sent += 1
+                if sent:
+                    st.success(f"Posted {sent} alert(s) to Teams.")
+                else:
+                    st.warning("Attempted to post alerts but none succeeded. Check webhook/permissions.")
+            else:
+                with st.expander("Simulation output"):
+                    for _, row in to_send.iterrows():
+                        st.write(f"📧 {default_officer_email}")
+                        st.code(build_alert_message(row), language=None)
+                st.warning("Dry run ON or no Teams webhook provided → simulation only.")
+
+# -------------------------------
+# Footer
+# -------------------------------
+st.markdown("<hr style='border:0;height:1px;background:#eee;margin:1.5rem 0;'>", unsafe_allow_html=True)
+st.caption("Prototype • Hidden auto‑mapping • Loan type segmentation • Risk Landscape views • Alert simulation")
