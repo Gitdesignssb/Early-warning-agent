@@ -32,55 +32,43 @@ with st.sidebar:
         ["Severity thresholds", "Anomaly detection", "Alert routing"]
     )
 
-    # Defaults in case user switches sections before creating widgets:
-    # (they'll be redefined below if the section matches)
+    # Session defaults
     if "bounce_weight" not in st.session_state:
         st.session_state.update(
             bounce_weight=50, max_gap_points=40, delay_points_per_day=2,
             anomaly_points=20, severity_watch=30, severity_action=60,
             contamination=0.20, default_officer_email="credit.officer@example.com",
-            teams_webhook="", dry_run=True
+            teams_webhook=os.getenv("TEAMS_WEBHOOK_URL", ""), dry_run=True
         )
 
     if section == "Severity thresholds":
-        bounce_weight = st.slider("Bounce weight (points)", 10, 80, st.session_state.bounce_weight, 5)
-        max_gap_points = st.slider("Max points for EMI gap %", 10, 60, st.session_state.max_gap_points, 5)
-        delay_points_per_day = st.slider("Delay points/day (cap 30)", 1, 5, st.session_state.delay_points_per_day, 1)
-        anomaly_points = st.slider("Anomaly points", 5, 30, st.session_state.anomaly_points, 1)
-        severity_watch = st.slider("WATCH threshold (score ≥)", 10, 80, st.session_state.severity_watch, 5)
-        severity_action = st.slider("ACTION threshold (score ≥)", 20, 100, st.session_state.severity_action, 5)
-
-        st.session_state.update(
-            bounce_weight=bounce_weight, max_gap_points=max_gap_points,
-            delay_points_per_day=delay_points_per_day, anomaly_points=anomaly_points,
-            severity_watch=severity_watch, severity_action=severity_action
-        )
+        st.session_state.bounce_weight = st.slider("Bounce weight (points)", 10, 80, st.session_state.bounce_weight, 5)
+        st.session_state.max_gap_points = st.slider("Max points for EMI gap %", 10, 60, st.session_state.max_gap_points, 5)
+        st.session_state.delay_points_per_day = st.slider("Delay points/day (cap 30)", 1, 5, st.session_state.delay_points_per_day, 1)
+        st.session_state.anomaly_points = st.slider("Anomaly points", 5, 30, st.session_state.anomaly_points, 1)
+        st.session_state.severity_watch = st.slider("WATCH threshold (score ≥)", 10, 80, st.session_state.severity_watch, 5)
+        st.session_state.severity_action = st.slider("ACTION threshold (score ≥)", 20, 100, st.session_state.severity_action, 5)
 
     elif section == "Anomaly detection":
-        contamination = st.slider("Anomaly rate (contamination)", 0.01, 0.30, st.session_state.contamination, 0.01)
-        st.session_state.contamination = contamination
+        st.session_state.contamination = st.slider("Anomaly rate (contamination)", 0.01, 0.30, st.session_state.contamination, 0.01)
 
     elif section == "Alert routing":
-        default_officer_email = st.text_input("Officer email (demo)", st.session_state.default_officer_email)
-        teams_webhook_env = os.getenv("TEAMS_WEBHOOK_URL", "")
-        teams_webhook = st.text_input("Teams Incoming Webhook URL", st.session_state.get("teams_webhook", teams_webhook_env), type="password")
-        dry_run = st.checkbox("Dry run (simulate only)", value=st.session_state.dry_run)
+        st.session_state.default_officer_email = st.text_input("Officer email (demo)", st.session_state.default_officer_email)
+        st.session_state.teams_webhook = st.text_input("Teams Incoming Webhook URL", st.session_state.teams_webhook, type="password")
+        st.session_state.dry_run = st.checkbox("Dry run (simulate only)", value=st.session_state.dry_run)
 
-        st.session_state.update(
-            default_officer_email=default_officer_email, teams_webhook=teams_webhook, dry_run=dry_run
-        )
-
-# Make local copies for readability
-bounce_weight       = st.session_state.bounce_weight
-max_gap_points      = st.session_state.max_gap_points
-delay_points_per_day= st.session_state.delay_points_per_day
-anomaly_points      = st.session_state.anomaly_points
-severity_watch      = st.session_state.severity_watch
-severity_action     = st.session_state.severity_action
-contamination       = st.session_state.contamination
+# Local copies
+bounce_weight         = st.session_state.bounce_weight
+max_gap_points        = st.session_state.max_gap_points
+delay_points_per_day  = st.session_state.delay_points_per_day
+anomaly_points        = st.session_state.anomaly_points
+severity_watch        = st.session_state.severity_watch
+severity_action       = st.session_state.severity_action
+contamination         = st.session_state.contamination
 default_officer_email = st.session_state.default_officer_email
-teams_webhook       = st.session_state.teams_webhook
-dry_run             = st.session_state.dry_run
+teams_webhook         = st.session_state.teams_webhook
+dry_run               = st.session_state.dry_run
+
 # -------------------------------
 # Helpers & Schema
 # -------------------------------
@@ -98,7 +86,6 @@ REQUIRED_MIN = ["loan_id", "emi_due_date", "emi_amount", "amount_paid"]
 
 @st.cache_data(show_spinner=False)
 def load_csv(file_or_path):
-    # Supports both UploadedFile and filesystem path
     return pd.read_csv(file_or_path, sep=None, engine="python", encoding="utf-8-sig")
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -117,14 +104,6 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
                 remap[c] = logical
                 break
     return df.rename(columns=remap) if remap else df
-
-def get_auto_mapping(df: pd.DataFrame):
-    """Return dict: logical_field -> matched column (or None)."""
-    mapping = {}
-    cols = set(df.columns.str.lower())
-    for logical, candidates in REQUIRED_LOGICAL_FIELDS.items():
-        mapping[logical] = next((c for c in candidates if c in cols), None)
-    return mapping
 
 def coerce_numeric(series):
     return pd.to_numeric(series, errors="coerce")
@@ -168,38 +147,35 @@ tab_data, tab_portfolio, tab_risk, tab_customers, tab_alerts, tab_notify = st.ta
 with tab_data:
     st.subheader("📄 Raw Data")
 
-    # Safer sample file resolution
-    SAMPLE_PATH = Path(__file__).parent / "data" / "sample_data.csv"
-
+    # Strictly require an upload (no sample fallback)
     uploaded = st.file_uploader("Upload Loan Repayment CSV", type=["csv"])
-    if uploaded is not None:
-        df_raw = load_csv(uploaded)
-    elif SAMPLE_PATH.exists():
-        st.info("No file uploaded. Using bundled **data/sample_data.csv**.")
-        df_raw = load_csv(SAMPLE_PATH)
-    else:
-        st.warning(
-            "Please upload a CSV to continue. (No bundled sample file found at **data/sample_data.csv**.)"
-        )
+    if uploaded is None:
+        st.info("Upload a CSV to continue.")
         st.stop()
 
+    df_raw = load_csv(uploaded)
     st.dataframe(df_raw.head(50), use_container_width=True, height=220)
 
     # Normalize + auto-map
     df_norm = normalize_columns(df_raw)
 
-    # Condensed Column Mapping UI: single dropdown (hidden by default)
+    # === Column Mapping: single dropdown (Hidden by default) ===
     map_view = st.selectbox(
-        "Column Mapping UI",
+        "Column Mapping",
         ["Hidden", "View auto‑mapping"],
-        index=0 if os.getenv("SHOW_MAPPING", "0") != "1" else 1
+        index=0
     )
     if map_view == "View auto‑mapping":
-        auto_map = get_auto_mapping(df_norm)
-        map_df = pd.DataFrame({
-            "logical_field": list(auto_map.keys()),
-            "mapped_to": [auto_map[k] if auto_map[k] else "—" for k in auto_map.keys()]
-        })
+        # read-only mapping summary
+        cols_lower = set(df_norm.columns.str.lower())
+        mapping = {
+            logical: next((c for c in candidates if c in cols_lower), None)
+            for logical, candidates in REQUIRED_LOGICAL_FIELDS.items()
+        }
+        map_df = pd.DataFrame(
+            {"logical_field": list(mapping.keys()),
+             "mapped_to": [mapping[k] or "—" for k in mapping.keys()]}
+        )
         st.dataframe(map_df, use_container_width=True, height=220)
 
     # Validate required fields after normalize
@@ -314,8 +290,7 @@ with tab_data:
 with tab_portfolio:
     st.subheader("📊 Portfolio Overview")
 
-    total = len(work)
-    rules_high = int(work["rule_high"].sum())
+    total = len(work); rules_high = int(work["rule_high"].sum())
     anomalies = int((work["anomaly_flag"] == "Anomaly").sum())
     actions = int((work["severity"] == "Action").sum())
 
@@ -326,7 +301,6 @@ with tab_portfolio:
     m4.metric("Action Severity", actions)
 
     cA, cB = st.columns(2)
-    # Severity distribution
     fig_sev = px.histogram(
         work, x="severity", color="severity",
         color_discrete_map={"Info":"#6c757d","Watch":"#f39c12","Action":"#e74c3c"},
@@ -335,7 +309,6 @@ with tab_portfolio:
     )
     cA.plotly_chart(fig_sev, use_container_width=True)
 
-    # Loan type composition by severity
     fig_stack = px.histogram(
         work, x="loan_type", color="severity", barmode="group",
         color_discrete_map={"Info":"#6c757d","Watch":"#f39c12","Action":"#e74c3c"},
@@ -346,13 +319,11 @@ with tab_portfolio:
 # ============ RISK LANDSCAPE TAB ============
 with tab_risk:
     st.subheader("🗺️ Risk Landscape")
-
     view = st.radio("Choose view", ["Quadrant (Gap% vs Days Delay)", "Density Heatmap", "Sunburst (Loan Type → Severity)"], horizontal=True)
 
     if view == "Quadrant (Gap% vs Days Delay)":
         fig = px.scatter(
-            work,
-            x="days_delay", y="emi_gap_pct",
+            work, x="days_delay", y="emi_gap_pct",
             color="severity",
             color_discrete_map={"Info":"#6c757d","Watch":"#f39c12","Action":"#e74c3c"},
             size="risk_score",
@@ -373,10 +344,8 @@ with tab_risk:
         fig.update_yaxes(tickformat=".0%", title_text="EMI Gap (%)")
         fig.update_xaxes(title_text="Days Delay")
         st.plotly_chart(fig, use_container_width=True)
-
     else:
-        sb_df = work.copy()
-        sb_df["count"] = 1
+        sb_df = work.copy(); sb_df["count"] = 1
         fig = px.sunburst(
             sb_df, path=["loan_type", "severity"], values="count",
             color="severity",
@@ -437,11 +406,9 @@ with tab_customers:
 # ============ ALERTS TAB ============
 with tab_alerts:
     st.subheader("🚨 Alerts")
-
     sev_filter = st.multiselect("Filter by severity", ["Action","Watch","Info"], default=["Action","Watch"])
     alerts = work[work["severity"].isin(sev_filter)][
-        ["loan_id","customer_name","loan_type","severity","risk_score","reason_codes",
-         "emi_gap","emi_gap_pct","days_delay","bounce_flag"]
+        ["loan_id","customer_name","loan_type","severity","risk_score","reason_codes","emi_gap","emi_gap_pct","days_delay","bounce_flag"]
     ].sort_values(["severity","risk_score"], ascending=[False,False])
 
     if alerts.empty:
@@ -458,8 +425,7 @@ with tab_notify:
 
     base = work[work["severity"].isin(["Action","Watch"])]
     def msg_df(df):
-        return df[["loan_id","customer_name","loan_type","severity","risk_score","reason_codes",
-                   "emi_gap","emi_gap_pct","days_delay","bounce_flag"]].copy()
+        return df[["loan_id","customer_name","loan_type","severity","risk_score","reason_codes","emi_gap","emi_gap_pct","days_delay","bounce_flag"]].copy()
 
     scope = st.selectbox("Which alerts to send?", ["Action only", "Action + Watch", "All severities"])
     if scope == "Action only":
